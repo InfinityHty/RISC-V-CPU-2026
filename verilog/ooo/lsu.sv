@@ -3,26 +3,27 @@
 // load 乱序执行的访存排序检查、store-to-load 转发。
 // 结束约定：向 0x80000000 的 32 位 store（WSTRB=4'hf）即停机返回码。
 // 当前骨架：输出空闲。
+import cpu_pkg::*;
+
 module lsu
-  import cpu_pkg::*;
 (
   input  logic        clk,
   input  logic        rst,
 
   input  logic        issue_valid,
   output logic        issue_ready,
-  input  issue_t      issue_pkt,
+  input  cpu_pkg::issue_t      issue_pkt,
 
   // CDB 广播（store 数据唤醒）
-  input  cdb_t        cdb,
+  input  cpu_pkg::cdb_t        cdb,
 
   // ROB 退休提交（store 放行）
-  input  commit_t     commit,
+  input  cpu_pkg::commit_t     commit,
 
   // 误预测冲刷
-  input  flush_t      flush,
+  input  cpu_pkg::flush_t      flush,
 
-  output cdb_t        result_pkt,
+  output cpu_pkg::cdb_t        result_pkt,
   input  logic        result_ready,
 
   // 数据访存请求（lsu → dcache）

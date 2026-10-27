@@ -2,8 +2,9 @@
 // TODO: 数据/标签阵列用 sram_fakeram（WRITE_GRANULARITY=8 支持字节写）；
 // 缺失时经 mem_* 向 axi_master 发起行读写。
 // 当前骨架：输出空闲。
+import cpu_pkg::*;
+
 module dcache
-  import cpu_pkg::*;
 (
   input  logic        clk,
   input  logic        rst,
