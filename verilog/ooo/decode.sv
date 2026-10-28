@@ -246,8 +246,8 @@ module decode
     dec_pkt.is_store  = d_is_store;
   end
 
-  // 非法/全零指令当作 NOP：直接让 IFU 消费掉，不占 ROB/RS 资源。
-  assign dec_valid    = instr_valid && (d_op != cpu_pkg::OP_NOP);
+  // NOP 也进入 ROB，保证多路 bundle 的 valid 始终为连续前缀。
+  assign dec_valid    = instr_valid;
   assign instr_ready  = dec_ready;
 
   // clk/rst 当前不需要，保留端口以便后续插入译码寄存器。

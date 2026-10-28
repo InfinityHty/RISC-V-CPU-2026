@@ -6,6 +6,7 @@ module alu
 (
   input  logic   clk,
   input  logic   rst,
+  input  cpu_pkg::flush_t flush,
 
   input  logic   issue_valid,
   output logic   issue_ready,
@@ -89,6 +90,8 @@ module alu
       result_pkt <= '0;
     end else begin
       if (result_pkt.valid && result_ready)
+        result_pkt.valid <= 1'b0;
+      if (flush.valid && result_pkt.valid && flush.squash_mask[result_pkt.rob_idx])
         result_pkt.valid <= 1'b0;
       if (issue_fire)
         result_pkt <= computed;

@@ -6,16 +6,22 @@
 package cpu_pkg;
 
   // ---------------- 微架构参数（调参/报告扫描只改这里） ----------------
-  localparam int ISSUE_WIDTH    = 1;    // 发射宽度（第一版 1 宽）
-  localparam int DISPATCH_WIDTH = 1;    // rename → rs/rob 每拍条数
-  localparam int COMMIT_WIDTH   = 1;    // ROB 每拍退休条数
+  localparam int FETCH_WIDTH    = 4;
+  localparam int ISSUE_WIDTH    = 4;
+  localparam int DISPATCH_WIDTH = 4;
+  localparam int COMMIT_WIDTH   = 4;
+  localparam int CDB_WIDTH      = 4;
+  localparam int ALU_COUNT      = 4;
+  localparam int WIDTH_CNT_W    = $clog2(FETCH_WIDTH + 1);
+  localparam int PRF_READ_PORTS = 2 * (ISSUE_WIDTH + 2);
+  localparam int DIV_BITS_PER_CYCLE = 16;
   localparam int ROB_DEPTH      = 64;   // ROB 容量
   localparam int ROB_IDX_W      = $clog2(ROB_DEPTH);
   localparam int ROB_CNT_W      = $clog2(ROB_DEPTH + 1);
   localparam int RS_DEPTH       = 32;   // 保留站深度
   localparam int PRF_SIZE       = 64;   // 物理寄存器数量（tag 0 保留给 x0）
   localparam int TAG_W          = $clog2(PRF_SIZE);
-  localparam int CHECKPOINT_DEPTH = 8;  // RAT 快照数量
+  localparam int CHECKPOINT_DEPTH = 16;
   localparam int CKPT_IDX_W     = $clog2(CHECKPOINT_DEPTH);
   localparam int ICACHE_SETS       = 128;
   localparam int ICACHE_LINE_WORDS = 4;
@@ -24,7 +30,7 @@ package cpu_pkg;
   localparam int ICACHE_DEPTH      = ICACHE_SETS * ICACHE_LINE_WORDS;
   localparam int ICACHE_ADDR_W     = $clog2(ICACHE_DEPTH);
   localparam int ICACHE_TAG_W      = 32 - ICACHE_IDX_W - ICACHE_OFF_W - 2;
-  localparam int DCACHE_SETS       = 64;
+  localparam int DCACHE_SETS       = 1024;
   localparam int DCACHE_LINE_WORDS = 4;
   localparam int DCACHE_OFF_W      = $clog2(DCACHE_LINE_WORDS);
   localparam int DCACHE_IDX_W      = $clog2(DCACHE_SETS);
