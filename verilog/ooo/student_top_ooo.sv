@@ -265,6 +265,7 @@ module student_top
   muldiv u_muldiv (
     .clk         (clk),
     .rst         (rst),
+    .flush       (flush_bus),
     .issue_valid (rs_mul_issue_valid),
     .issue_ready (mul_issue_ready),
     .issue_pkt   (rs_mul_issue_pkt),

@@ -100,6 +100,7 @@ commit_bus(commit_t)
 - ROB **每条退休指令都拉高** `commit.valid`；LSU 只看 `commit.valid && commit.is_store`。
 - store 必须等到对应 `commit` 出现后才真正发往 D-Cache。
 - **已提交 store 不可被后续 flush 清除**：LSU 需要 committed store queue。ROB 在发出 commit 后即退休该 store，并释放物理寄存器；LSU 必须已经保存地址和数据。
+- store 在地址和数据已安全存入 store buffer 后，先通过 CDB 广播完成（`tag=0`），ROB 才能退休并发出 commit；真正写内存后不再产生第二次 CDB。
 
 ## ④ A→全体：执行时误预测冲刷
 
@@ -127,7 +128,8 @@ typedef struct packed {
 - I-Cache：若正在 refill，继续把当前行填完（方便重定向后命中），但不再返回旧请求；
   **AXI master 不能因为 flush 丢弃已经接受的 refill 请求**，否则 I-Cache 会卡死。
 - RS：清除被 squash 的发射项；更老项保留。
-- LSU：清除未提交的年轻 store；已提交 store 保留。
+- MULDIV：额外接收 `flush`；当前运算或待广播结果被 squash 时取消，禁止迟到 CDB 唤醒已复用 tag。
+- LSU：清除未提交的年轻 store；已提交 store 保留。被 squash 的在途 load 可继续等待响应以排空总线，但不得广播结果。
 - ROB：清除 `squash_mask` 覆盖的 ROB 项；分支本身保留，之后正常提交。
 - rename：见下节，恢复 RAT 快照并归还 `free_mask` 的 tag。
 
@@ -168,8 +170,9 @@ prf_raddr1/2, prf_rdata1/2
 
 ### PRF 读口
 
-PRF 只有 2 个组合读口。B 的 RS 有 ALU/MUL/LSU 三个发射端口，但**同一拍最多只能选一条指令读 PRF**；
-B 必须在 RS 内做发射仲裁，或后续把 PRF/RS 接口扩成多读口。
+PRF 只有 2 个组合读口。B 的 RS 有 ALU/MUL/LSU 三个发射端口，但**同一拍最多只能选一条指令读 PRF**。
+RS 选择最老的就绪指令，避免年轻访存操作在 LSU 反压时挡住更老、可解决提交依赖的 ALU/分支指令；
+所有访存操作还额外按程序年龄发射。
 
 ## ⑥ 访存内部链路
 
@@ -180,7 +183,10 @@ req_valid/req_ready/req_addr[/req_wdata/req_wstrb/req_write] + resp_valid/resp_d
 ```
 
 - AXI 从机握手后最早下一拍响应，默认延迟 10 拍；地址 4 字节对齐。
-- 响应 `resp_valid` 必须是**单拍脉冲**。
+- 响应 `resp_valid` 必须是**单拍脉冲**，没有 ready，接收方必须当拍消费。
+- LSU 负责有效地址计算、AXI 字地址对齐、store 数据移位/wstrb 和 load 提取/扩展；D-Cache 接收对齐字访问。
+- 第一版数据侧最多一个 outstanding；RS 按程序年龄发射访存，年轻 load 不越过未完成的年老 store。
+- D-Cache 第一版为 64 set × 4 word 直接映射、写穿、no-write-allocate；MMIO 不缓存。
 - I-Cache 对 AXI 只保持一个 outstanding 行 refill；对 IFU 支持每拍 accept 一个请求，
   IFU 内部用 4 项请求 FIFO 保存 PC/预测信息，响应按请求顺序返回。
 - 停机约定：向 `0x80000000` 写 32 位（WSTRB=4'hf），WDATA 即返回码。
@@ -218,7 +224,9 @@ req_valid/req_ready/req_addr[/req_wdata/req_wstrb/req_write] + resp_valid/resp_d
 - 每个文件在 module 之前放 `import cpu_pkg::*;`（参数名可直接用）；
 - **port 声明和局部变量里的 package 类型必须写全限定名**，如
   `cpu_pkg::dispatch_t`、`cpu_pkg::cdb_t`、`cpu_pkg::opcode_e`；
-- enum 字面量写 `cpu_pkg::OP_ADDI`。
+- enum 字面量写 `cpu_pkg::OP_ADDI`；
+- RS 的完整结构体表项使用 `logic [$bits(disp_pkt)-1:0] entries [RS_DEPTH]` 存储，
+  发射选择和 PRF 地址使用显式字段数组，避免 Yosys 将结构体数组字段错误地常量折叠。
 
 Verilator 和 Icarus 也接受这种写法。
 
@@ -231,31 +239,19 @@ Verilator 和 Icarus 也接受这种写法。
 
 ## 当前状态
 
-- **基线（main）**：`verilog/filelist.f` 仍是五级顺序流水线，19/19 correctness 通过；
-  `make perf` GEOMEAN ≈ 0.1381；`make synth` 面积 ≈ 2,969 µm²、频率 ≈ 50.86 MHz。
-- **OoO（`verilog/ooo/`）**：A 侧核心已实现并通过单元测试：
-  - `decode.sv`：RV32IM 全译码，非法指令当 NOP（不产生 `dec_valid`，由 IFU 直接消费）；
-  - `prf.sv`：x0、CDB 写、owner 保护、2 读口；
-  - `rename.sv`：RAT、free/ready bitmap、checkpoint、flush 恢复；
-  - `rob.sv`：分配/完成/按序提交/store commit/执行时 flush；
-  - `ifu.sv`：IFU → I-Cache，4 项请求 FIFO + 4 项指令 FIFO，支持多 outstanding；
-    bpred 预测 taken 时请求 PC 直接跳 target；
-  - `icache.sv`：2 KiB 直接映射 I-Cache，sram_fakeram 数据阵列，行 refill，
-    flush 时抑制旧响应；
-  - `bpred.sv`：BTB + 2-bit BHT，完整 PC 匹配，ROB/CDB 驱动更新。
-- A 侧定向单元测试在 `verilog/ooo/tb/`（`tb_decode` / `tb_core` / `tb_ifu` /
-  `tb_bpred` / `tb_icache` / `tb_ifu_pred` / `tb_frontend`），运行方法见
-  `verilog/ooo/tb/README.md`。
-- `verilog/ooo/filelist.f` 可用于 OoO 编译检查：
-
-```sh
-make build FILELIST=verilog/ooo/filelist.f BUILD=build/ooo
-```
-
-- B 侧模块仍是空壳（输出空闲），所以 OoO 顶层目前只能编译，不能跑通程序。
-- `make synth FILELIST=verilog/ooo/filelist.f` 已能被 Yosys 解析；但由于 B 是空壳，
-  优化会把 A 侧逻辑剪掉，当前面积/频率数据无参考意义。
-- `icache.sv` / `bpred.sv` 已在顶层例化并接入 IFU/decode；A 侧前端联调测试
-  `tb_frontend` 通过。
-- 切到 OoO 主构建时，把 `verilog/filelist.f` 换成 OoO 文件列表（注意 `cpu_pkg.sv` 必须排在最前），
-  并移除基线 `student_top.sv`，避免两个 `student_top` 模块冲突。
+- **默认构建已切换到 OoO**：`verilog/filelist.f` 使用 `ooo/student_top_ooo.sv`，
+  基线五级流水线源码仍保留但不参与默认构建。
+- A 侧实现 RV32IM 译码、RAT/checkpoint、ROB 按序提交、PRF owner 保护、IFU、
+  2 KiB I-Cache 和 BTB/BHT 分支预测。
+- B 侧实现最老就绪优先的统一 RS、单周期 ALU、乘法与 32 拍迭代除法、
+  单在途 LSU、committed store 放行、1 KiB 写穿 D-Cache、单 CDB 和 AXI4-Lite 主控。
+- `make test MAX_CYCLES=100000000`：19/19 correctness 通过。
+- 14/14 A/B 定向测试通过；B 侧覆盖 ALU、RS、CDB、MULDIV、LSU、D-Cache 和
+  AXI 主控，测试位于 `verilog/ooo/tb/`，运行方法见 `verilog/ooo/tb/README.md`。
+- `make perf MAX_CYCLES=100000000`：6 个基准的 GEOMEAN IPC 为 0.1944。
+- `make synth MODE=opt CLOCK_PERIOD_NS=2.0`：总面积 14,247.326 µm²
+  （组合 7,183.041、时序 6,032.329、SRAM 1,031.956），估算频率 39.62 MHz，
+  最小周期 25.2402 ns，2 ns 约束下 worst setup slack 为 -23.2394 ns。
+- `diagnose` 中 RS 面积为 3,376.436 µm²，是最大的逻辑模块；当前 IPC 和频率均未达到
+  Tier 1 的 0.6000 / 300 MHz 要求。详细结果见 `build/synth/diagnose/` 和
+  `build/synth/opt/`。

@@ -1,7 +1,7 @@
-# A-side unit tests
+# A/B-side directed unit tests
 
 These testbenches are **not** part of `verilog/ooo/filelist.f` and are not built by
-`make`. They are directed tests for the A-side modules.
+`make`. They cover the ordered front end and the execution/memory modules.
 
 Run them inside the course AppImage so the bundled Verilator is used:
 
@@ -58,6 +58,32 @@ Run them inside the course AppImage so the bundled Verilator is used:
    verilog/ooo/tb/tb_frontend.sv && /tmp/tb_frontend'
 ```
 
+B-side tests (run sequentially in one AppImage process):
+
+```sh
+./cpu2026-tools-x86_64.AppImage exec sh -c '
+  set -e
+  for tb in alu rs cdb muldiv axi_master lsu; do
+    mkdir -p "build/tb_${tb}"
+    rm -rf "build/tb_${tb}/obj"
+    "$APPDIR/bin/verilator" --binary --timing -Wno-fatal -Wno-lint \
+      --Mdir "build/tb_${tb}/obj" --top-module "tb_${tb}" \
+      -o "$PWD/build/tb_${tb}/sim" verilog/ooo/cpu_pkg.sv \
+      "verilog/ooo/${tb}.sv" "verilog/ooo/tb/tb_${tb}.sv"
+    "build/tb_${tb}/sim"
+  done
+  tb=dcache
+  mkdir -p "build/tb_${tb}"
+  rm -rf "build/tb_${tb}/obj"
+  "$APPDIR/bin/verilator" --binary --timing -Wno-fatal -Wno-lint \
+    --Mdir "build/tb_${tb}/obj" --top-module "tb_${tb}" \
+    -o "$PWD/build/tb_${tb}/sim" verilog/ooo/cpu_pkg.sv \
+    "verilog/ooo/${tb}.sv" scripts/ram/sram_fakeram.sv \
+    "verilog/ooo/tb/tb_${tb}.sv"
+  "build/tb_${tb}/sim"
+'
+```
+
 Expected output:
 
 ```text
@@ -68,4 +94,11 @@ TB_IFU_PRED_PASS
 TB_BPRED_PASS
 TB_ICACHE_PASS
 TB_FRONTEND_PASS
+TB_ALU_PASS
+TB_RS_PASS
+TB_CDB_PASS
+TB_MULDIV_PASS
+TB_AXI_MASTER_PASS
+TB_LSU_PASS
+TB_DCACHE_PASS
 ```

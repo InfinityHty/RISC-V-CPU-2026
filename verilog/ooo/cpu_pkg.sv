@@ -24,7 +24,13 @@ package cpu_pkg;
   localparam int ICACHE_DEPTH      = ICACHE_SETS * ICACHE_LINE_WORDS;
   localparam int ICACHE_ADDR_W     = $clog2(ICACHE_DEPTH);
   localparam int ICACHE_TAG_W      = 32 - ICACHE_IDX_W - ICACHE_OFF_W - 2;
-  localparam int DCACHE_SETS    = 64;
+  localparam int DCACHE_SETS       = 64;
+  localparam int DCACHE_LINE_WORDS = 4;
+  localparam int DCACHE_OFF_W      = $clog2(DCACHE_LINE_WORDS);
+  localparam int DCACHE_IDX_W      = $clog2(DCACHE_SETS);
+  localparam int DCACHE_DEPTH      = DCACHE_SETS * DCACHE_LINE_WORDS;
+  localparam int DCACHE_ADDR_W     = $clog2(DCACHE_DEPTH);
+  localparam int DCACHE_TAG_W      = 32 - DCACHE_IDX_W - DCACHE_OFF_W - 2;
 
   // 分支预测器：BTB + 2-bit BHT，BTB 用完整 PC 匹配，避免非分支误预测。
   localparam int BPRED_ENTRIES = 64;

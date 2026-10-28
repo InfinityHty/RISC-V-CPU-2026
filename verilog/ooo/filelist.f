@@ -1,6 +1,6 @@
 # OoO build file list. Paths are relative to this file.
 # The top module is student_top (defined in student_top_ooo.sv).
-# The baseline in ../filelist.f is kept buildable for the in-order milestone.
+# The default ../filelist.f uses the same OoO source list.
 
 cpu_pkg.sv
 decode.sv

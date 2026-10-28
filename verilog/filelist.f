@@ -1,10 +1,20 @@
 # RTL paths are relative to this file in verilog/.
-# The top-level module must be named student_top.
-#
-# Milestone: RV32IM 5-stage in-order pipeline (IF/ID/EX/MEM/WB).
-# The out-of-order skeleton is preserved under verilog/ooo/ and is NOT built.
+# Default target: single-issue RV32IM out-of-order core with in-order commit.
+# cpu_pkg.sv must remain first.
 
-axi_bus.sv      # AXI4-Lite master: read arbiter (load > ifetch) + store channel
-ifetch.sv       # sequential prefetch FIFO (depth 4), epoch-based redirect discard
-pipe_core.sv    # 5-stage pipeline: decode, hazard/forwarding, blocking MEM, RV32M
-student_top.sv  # top level, wiring only (course-fixed ports)
+ooo/cpu_pkg.sv
+ooo/decode.sv
+ooo/prf.sv
+ooo/rename.sv
+ooo/rob.sv
+ooo/ifu.sv
+ooo/alu.sv
+ooo/muldiv.sv
+ooo/lsu.sv
+ooo/rs.sv
+ooo/cdb.sv
+ooo/dcache.sv
+ooo/axi_master.sv
+ooo/icache.sv
+ooo/bpred.sv
+ooo/student_top_ooo.sv
