@@ -15,17 +15,23 @@
 ## 第一版参数
 
 ```systemverilog
-ISSUE_WIDTH = 1;       // 第一版 1 宽
-ROB_DEPTH   = 64;
-RS_DEPTH    = 32;
-PRF_SIZE    = 64;      // tag 0 固定给 x0
-CHECKPOINT_DEPTH = 8;
+FETCH_WIDTH = 4;
+ISSUE_WIDTH = 4;
+DISPATCH_WIDTH = 4;
+COMMIT_WIDTH = 4;
+CDB_WIDTH = 4;
+ALU_COUNT = 4;
+ROB_DEPTH = 64;
+RS_DEPTH = 32;
+PRF_SIZE = 64;         // tag 0 固定给 x0
+CHECKPOINT_DEPTH = 16;
+PRF_READ_PORTS = 12;   // 4 ALU x2 + MUL x2 + LSU x2
 ICACHE_SETS = 128;     // 每行 4 word => 2 KiB
 ICACHE_LINE_WORDS = 4;
+DCACHE_SETS = 1024;    // 每行 4 word => 4 KiB
+DCACHE_LINE_WORDS = 4;
 BPRED_ENTRIES = 64;    // BTB/BHT 项数
 ```
-
-后续冲 Tier 2/3 时再扩双发射/双提交/双 CDB；接口字段先按单口实现。
 
 ## 分工
 
@@ -87,7 +93,7 @@ rob_alloc_old_tag   // rd_arch 原来的物理 tag，提交时归还 free list
   `update_taken = (correct_pc != pc + 4)`。
 - ALU 对 `issue_pkt.d.pred_taken/pred_target` 做比较：实际 taken/target 与预测不一致时
   置 `mispredict=1`；非控制流指令不置 `is_branch`。JAL/JALR 也按控制流处理。
-- 单 CDB：每拍最多完成一条指令。B 的 `cdb.sv` 在 ALU/MUL/LSU 之间固定优先级仲裁。
+- 4 条 CDB：ALU/MUL/LSU 每拍最多完成 4 条（优先级 LSU → MUL → 4 个 ALU）。
 
 ## ③ A→B：提交
 
@@ -170,7 +176,7 @@ prf_raddr1/2, prf_rdata1/2
 
 ### PRF 读口
 
-PRF 只有 2 个组合读口。B 的 RS 有 ALU/MUL/LSU 三个发射端口，但**同一拍最多只能选一条指令读 PRF**。
+PRF 有 12 个组合读口：4 个 ALU lane ×2 + MUL ×2 + LSU ×2。
 RS 选择最老的就绪指令，避免年轻访存操作在 LSU 反压时挡住更老、可解决提交依赖的 ALU/分支指令；
 所有访存操作还额外按程序年龄发射。
 
@@ -186,7 +192,8 @@ req_valid/req_ready/req_addr[/req_wdata/req_wstrb/req_write] + resp_valid/resp_d
 - 响应 `resp_valid` 必须是**单拍脉冲**，没有 ready，接收方必须当拍消费。
 - LSU 负责有效地址计算、AXI 字地址对齐、store 数据移位/wstrb 和 load 提取/扩展；D-Cache 接收对齐字访问。
 - 第一版数据侧最多一个 outstanding；RS 按程序年龄发射访存，年轻 load 不越过未完成的年老 store。
-- D-Cache 第一版为 64 set × 4 word 直接映射、写穿、no-write-allocate；MMIO 不缓存。
+- D-Cache 为 1024 set × 4 word（4 KiB）直接映射、写穿、no-write-allocate；
+  8 项写队列，store 命中同时更新数据阵列，没有脏行回写；MMIO 不缓存。
 - I-Cache 对 AXI 只保持一个 outstanding 行 refill；对 IFU 支持每拍 accept 一个请求，
   IFU 内部用 4 项请求 FIFO 保存 PC/预测信息，响应按请求顺序返回。
 - 停机约定：向 `0x80000000` 写 32 位（WSTRB=4'hf），WDATA 即返回码。
@@ -234,7 +241,7 @@ Verilator 和 Icarus 也接受这种写法。
 
 - 统一用 `make run PROGRAM=... EXPECTED=... LOG=run.log` + `$display` 打日志。
 - 日志格式：`[%0t] [模块名] 事件 关键字段`。
-- 本地 correctness 长用例需要提高周期上限：`make test MAX_CYCLES=100000000`。
+- 本地 correctness 长用例需要提高周期上限：`make test MAX_CYCLES=200000000`。
   默认 1,000,000 会让 `correctness_pi` / `qsort` / `tak` 等被误判超时。
 
 ## 当前状态
@@ -243,15 +250,13 @@ Verilator 和 Icarus 也接受这种写法。
   基线五级流水线源码仍保留但不参与默认构建。
 - A 侧实现 RV32IM 译码、RAT/checkpoint、ROB 按序提交、PRF owner 保护、IFU、
   2 KiB I-Cache 和 BTB/BHT 分支预测。
-- B 侧实现最老就绪优先的统一 RS、单周期 ALU、乘法与 32 拍迭代除法、
-  单在途 LSU、committed store 放行、1 KiB 写穿 D-Cache、单 CDB 和 AXI4-Lite 主控。
-- `make test MAX_CYCLES=100000000`：19/19 correctness 通过。
+- B 侧实现最老就绪优先的统一 RS、4 个单周期 ALU、乘法与 2 拍 16-bit/cycle
+  迭代除法、单在途 LSU、committed store 放行、4 KiB 写穿 D-Cache（8 项写队列）、
+  4 条 CDB 和 AXI4-Lite 主控。
+- `make test MAX_CYCLES=200000000`：19/19 correctness 通过（当前 4 宽实现）。
 - 14/14 A/B 定向测试通过；B 侧覆盖 ALU、RS、CDB、MULDIV、LSU、D-Cache 和
   AXI 主控，测试位于 `verilog/ooo/tb/`，运行方法见 `verilog/ooo/tb/README.md`。
-- `make perf MAX_CYCLES=100000000`：6 个基准的 GEOMEAN IPC 为 0.1944。
-- `make synth MODE=opt CLOCK_PERIOD_NS=2.0`：总面积 14,247.326 µm²
-  （组合 7,183.041、时序 6,032.329、SRAM 1,031.956），估算频率 39.62 MHz，
-  最小周期 25.2402 ns，2 ns 约束下 worst setup slack 为 -23.2394 ns。
-- `diagnose` 中 RS 面积为 3,376.436 µm²，是最大的逻辑模块；当前 IPC 和频率均未达到
-  Tier 1 的 0.6000 / 300 MHz 要求。详细结果见 `build/synth/diagnose/` 和
-  `build/synth/opt/`。
+- 当前暂不追求 perf 指标；perf 结果需要在本轮正确性修复后重新测量。
+- 旧的 synthesis/perf 数据（面积 14,247 µm²、39.62 MHz、IPC 0.1944）对应
+  1 宽 / 1 KiB D-Cache 版本，已经被当前 4 宽 / 4 KiB D-Cache 版本取代；
+  需要重新运行 `make perf` 和 `make synth` 后再更新。

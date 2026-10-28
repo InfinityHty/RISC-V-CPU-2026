@@ -251,28 +251,6 @@ module student_top
     .bvalid(bvalid), .bready(bready)
   );
 
-  logic [31:0] debug_pc [ROB_DEPTH];
-  int debug_cycle;
-  always_ff @(posedge clk) begin
-    if (rst) begin
-      debug_cycle <= 0;
-    end else begin
-      debug_cycle <= debug_cycle + 1;
-      for (int i = 0; i < DISPATCH_WIDTH; i++)
-        if (rn_rob_valid[i])
-          debug_pc[rob_alloc_idx[i]] <= rn_rob_pkt[i].pc;
-      for (int i = 0; i < COMMIT_WIDTH; i++)
-        if (commit_bus[i].valid)
-          $display("COMMIT %h", debug_pc[commit_bus[i].rob_idx]);
-      if (debug_cycle % 10000 == 0)
-        $display("STATE %0d rob=%0d,%0d,%0d pc=%h done=%b l=%0d,%0d,%0d,%0d req=%b,%b resp=%b sq=%0d,%0d,%0d dc=%0d,%0d wq=%0d result=%b issue=%b",
-          debug_cycle, u_rob.head, u_rob.tail, u_rob.count, debug_pc[u_rob.head],
-          u_rob.completed[u_rob.head], u_lsu.load_count, u_lsu.load_head,
-          u_lsu.load_req_ptr, u_lsu.load_tail, lsu_mem_req_valid, lsu_mem_req_ready,
-          lsu_mem_resp_valid, u_lsu.sq_count, u_lsu.sq_head, u_lsu.sq_tail,
-          u_dcache.load_state, u_dcache.write_state, u_dcache.wq_count,
-          lsu_result.valid, rs_lsu_issue_valid && lsu_issue_ready);
-    end
-  end
+
 
 endmodule

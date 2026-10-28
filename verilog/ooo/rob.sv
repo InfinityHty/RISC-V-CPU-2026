@@ -27,6 +27,9 @@ module rob
   logic [TAG_W-1:0] rd_tag [ROB_DEPTH];
   logic [TAG_W-1:0] old_tag [ROB_DEPTH];
   logic is_store [ROB_DEPTH];
+  // PC 用作 ROB 项的 generation 校验：squash 后较早的 FU 结果可能在
+  // rob_idx 已被复用时才回到 CDB，不能让它完成/冲刷新项。
+  logic [31:0] pc [ROB_DEPTH];
   logic [ROB_IDX_W-1:0] head, tail;
   logic [ROB_CNT_W-1:0] count;
 
@@ -56,7 +59,8 @@ module rob
     flush_age = '1;
     for (int c = 0; c < CDB_WIDTH; c++) begin
       if (cdb[c].valid && cdb[c].is_branch && cdb[c].mispredict
-          && valid[cdb[c].rob_idx] && !completed[cdb[c].rob_idx]) begin
+          && valid[cdb[c].rob_idx] && !completed[cdb[c].rob_idx]
+          && cdb[c].pc == pc[cdb[c].rob_idx]) begin
         if (!flush_found || (cdb[c].rob_idx - head) < flush_age) begin
           flush_found = 1'b1;
           flush_idx = cdb[c].rob_idx;
@@ -116,11 +120,13 @@ module rob
     for (int c = 0; c < CDB_WIDTH; c++) begin
       ckpt_release_valid[c] = cdb[c].valid && cdb[c].is_branch && !cdb[c].mispredict
                            && valid[cdb[c].rob_idx] && !completed[cdb[c].rob_idx]
-                           && !squash_mask[cdb[c].rob_idx];
+                           && !squash_mask[cdb[c].rob_idx]
+                           && cdb[c].pc == pc[cdb[c].rob_idx];
       ckpt_release_rob_idx[c] = cdb[c].rob_idx;
       branch_update_valid[c] = cdb[c].valid && cdb[c].is_branch
                             && valid[cdb[c].rob_idx] && !completed[cdb[c].rob_idx]
-                            && !squash_mask[cdb[c].rob_idx];
+                            && !squash_mask[cdb[c].rob_idx]
+                            && cdb[c].pc == pc[cdb[c].rob_idx];
     end
   end
 
@@ -136,6 +142,7 @@ module rob
         rd_tag[i] <= '0;
         old_tag[i] <= '0;
         is_store[i] <= 1'b0;
+        pc[i] <= '0;
       end
     end else begin
       for (int i = 0; i < DISPATCH_WIDTH; i++) begin
@@ -146,12 +153,13 @@ module rob
           rd_tag[rob_alloc_idx[i]] <= rob_alloc_pkt[i].rd_tag;
           old_tag[rob_alloc_idx[i]] <= rob_alloc_old_tag[i];
           is_store[rob_alloc_idx[i]] <= rob_alloc_pkt[i].is_store;
+          pc[rob_alloc_idx[i]] <= rob_alloc_pkt[i].pc;
         end
       end
 
       for (int c = 0; c < CDB_WIDTH; c++)
         if (cdb[c].valid && valid[cdb[c].rob_idx] && !completed[cdb[c].rob_idx]
-            && !squash_mask[cdb[c].rob_idx])
+            && !squash_mask[cdb[c].rob_idx] && cdb[c].pc == pc[cdb[c].rob_idx])
           completed[cdb[c].rob_idx] <= 1'b1;
 
       for (int i = 0; i < COMMIT_WIDTH; i++)

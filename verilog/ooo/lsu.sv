@@ -77,7 +77,8 @@ module lsu
   wire store_result_blocked = mem_resp_valid || (result_pkt.valid && !result_ready);
   assign issue_ready = !flush.valid && (issue_pkt.d.is_store
                      ? (sq_count < STORE_DEPTH && !store_result_blocked)
-                     : (load_count < LOAD_DEPTH && sq_count == 0));
+                     : (load_count < LOAD_DEPTH && sq_count == 0
+                        && (!result_pkt.valid || result_ready)));
   wire issue_fire = issue_valid && issue_ready && !issue_squashed;
   wire store_fire = issue_fire && issue_pkt.d.is_store;
   wire load_fire = issue_fire && !issue_pkt.d.is_store;
@@ -90,8 +91,13 @@ module lsu
   wire sq_drain = store_req_valid && store_req_ready;
   wire sq_pop = sq_drop || sq_drain;
 
-  assign mem_req_valid = load_count != 0 && load_req_ptr != load_tail
-                      && !load_requested[load_req_ptr];
+  // load_req_ptr == load_tail 在队列满（count==LOAD_DEPTH）时也可能成立；
+  // 此时仍有尚未发出的请求，必须用 count 区分“满”和“空”。
+  wire load_req_pending = (load_req_ptr != load_tail)
+                       || (load_count == LOAD_CNT_W'(LOAD_DEPTH));
+  assign mem_req_valid = load_count != 0 && load_req_pending
+                      && !load_requested[load_req_ptr]
+                      && (!result_pkt.valid || result_ready);
   assign mem_req_addr = {load_addr[load_req_ptr][31:2], 2'b00};
   assign mem_req_wdata = 32'd0;
   assign mem_req_wstrb = 4'b0000;
@@ -143,8 +149,9 @@ module lsu
         result_pkt.pc <= issue_pkt.d.pc;
         result_pkt.correct_pc <= issue_pkt.d.pc + 32'd4;
       end
-      if (sq_pop)
+      if (sq_pop) begin
         sq_head <= sq_head + 1'b1;
+      end
       sq_count <= sq_count + (store_fire ? 1 : 0) - (sq_pop ? 1 : 0);
 
       for (int c = 0; c < COMMIT_WIDTH; c++) begin
@@ -188,9 +195,14 @@ module lsu
       end
 
       if (flush.valid) begin
+        // 已提交 store 不可被后续 flush 清除；否则 rob_idx 复用后可能
+        // 把一条已经提交、尚未落盘的 store 误杀。
         for (int i = 0; i < STORE_DEPTH; i++)
-          if (i < sq_count && flush.squash_mask[sq_rob[STORE_PTR_W'(sq_head + i)]])
+          if (i < sq_count
+              && !sq_committed[STORE_PTR_W'(sq_head + i)]
+              && flush.squash_mask[sq_rob[STORE_PTR_W'(sq_head + i)]]) begin
             sq_killed[STORE_PTR_W'(sq_head + i)] <= 1'b1;
+          end
         for (int i = 0; i < LOAD_DEPTH; i++)
           if (i < load_count && flush.squash_mask[load_rob[LOAD_PTR_W'(load_head + i)]])
             load_killed[LOAD_PTR_W'(load_head + i)] <= 1'b1;

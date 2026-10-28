@@ -22,7 +22,8 @@ module muldiv
   logic [5:0] div_count;
   logic div_neg_quotient, div_neg_remainder;
 
-  logic cache_valid;
+  // 除法缓存必须区分 signed/unsigned；否则 DIV 与 DIVU 相同操作数会串用结果。
+  logic cache_valid, cache_signed;
   logic [31:0] cache_lhs, cache_rhs, cache_quotient, cache_remainder;
 
   logic signed [32:0] mul_lhs, mul_rhs;
@@ -50,7 +51,8 @@ module muldiv
   wire issue_fire = issue_valid && issue_ready && !issue_squashed;
   wire issue_div_signed = issue_pkt.d.op == cpu_pkg::OP_DIV || issue_pkt.d.op == cpu_pkg::OP_REM;
   wire issue_div_zero = issue_pkt.rs2_val == 0;
-  wire cache_hit = cache_valid && cache_lhs == issue_pkt.rs1_val && cache_rhs == issue_pkt.rs2_val;
+  wire cache_hit = cache_valid && cache_signed == issue_div_signed
+                && cache_lhs == issue_pkt.rs1_val && cache_rhs == issue_pkt.rs2_val;
 
   logic [31:0] div_work_quotient;
   logic [32:0] div_work_remainder;
@@ -102,6 +104,7 @@ module muldiv
       div_neg_quotient <= 1'b0;
       div_neg_remainder <= 1'b0;
       cache_valid <= 1'b0;
+      cache_signed <= 1'b0;
       cache_lhs <= '0;
       cache_rhs <= '0;
       cache_quotient <= '0;
@@ -157,6 +160,7 @@ module muldiv
               else
                 result_pkt <= make_result(op_reg, div_signed_remainder);
               cache_valid <= 1'b1;
+              cache_signed <= op_reg.d.op == cpu_pkg::OP_DIV || op_reg.d.op == cpu_pkg::OP_REM;
               cache_lhs <= op_reg.rs1_val;
               cache_rhs <= op_reg.rs2_val;
               cache_quotient <= div_signed_quotient;
